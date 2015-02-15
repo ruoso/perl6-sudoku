@@ -158,9 +158,9 @@ sub solve-sudoku($sudoku, Int $level = 1) {
                     say '.' x $level ~ "Solved... ($_ on "~($x+1)~" "~($y+1)~")";
                     return $solution;
                 }
-                say '.' x $level ~ "Backtrack, path unsolvable... (on "~($x+1)~" "~($y+1)~")";
-                return 0;
             }
+            say '.' x $level ~ "Backtrack, path unsolvable... (on "~($x+1)~" "~($y+1)~")";
+            return 0;
         }
         return $sudoku;
     } else {
