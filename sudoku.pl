@@ -1,142 +1,44 @@
 #!/usr/bin/env perl6
+use v6;
+#
+# In this code, a sudoku puzzle is represented as a two-dimentional
+# array. The cells that are not yet solved are represented by yet
+# another array of all the possible values.
+#
+# This implementation is not a simple brute force evaluation of all
+# the options, but rather makes four extra attempts to guide the
+# solution:
+#
+#  1) For every change in the grid, usually made by an attempt at a
+#     solution, we will reduce the search space of the possible values
+#     in all the other cells before going forward.
+#
+#  2) When a cell that is not yet resolved is the only one that can
+#     hold a specific value, resolve it immediately instead of
+#     performing the regular search.
+#
+#  3) Instead of trying from cell 1,1 and moving in sequence, this
+#     implementation will start trying on the cell that is the closest
+#     to being solved already.
+#
+#  4) Instead of trying all possible values in sequence, start with
+#     the value that is the most unique. I.e.: If the options for this
+#     cell are 1,4,6 and 6 is only a candidate for two of the
+#     competing cells, we start with that one.
+#
 
-# A unfilled cell is never equal to any value
-multi compare-cell(Array $other, Int $this) {
-    return 0;
-}
-multi compare-cell(Int $other, Int $this) {
-    return $other == $this;
-}
+# keep a list with all the cells, handy for traversal
+my @cells = do for 0..8 X 0..8 -> $x, $y { [ $x, $y ] };
 
-sub cleanup-impossible-values($sudoku, Int $level = 1) {
-    my Bool $resolved;
-    repeat {
-        $resolved = False;
-        for 0..2 X 0..2 X 0..2 X 0..2 -> int $sx, int $sy, int $x, int $y {
-            if ($sudoku[$x+3*$sx][$y+3*$sy] ~~ Array) {
-                # impossible values are the values listed as possible but that
-                # actually are already assigned...
-                # for all the possible values
-                $sudoku[$x+3*$sx][$y+3*$sy] = [
-                    grep { !compare-cell($sudoku[any(0..2)+3*$sx][any(0..2)+3*$sy], $_) },
-                    grep { !compare-cell($sudoku[any(0..8)][$y+3*$sy], $_)  },
-                    grep { !compare-cell($sudoku[$x+3*$sx][any(0..8)], $_) },
-                    @($sudoku[$x+3*$sx][$y+3*$sy]);
-                    ];
-                if ($sudoku[$x+3*$sx][$y+3*$sy].elems == 1) {
-                    # if only one element is left, then make it resolved
-                    #say '.' x $level ~ (1+$x+3*$sx)~" "~(1+$y+3*$sy)~" solved...";
-                    $sudoku[$x+3*$sx][$y+3*$sy] =
-                        $sudoku[$x+3*$sx][$y+3*$sy].shift;
-                    $resolved = True;
-                } elsif ($sudoku[$x+3*$sx][$y+3*$sy].elems == 0) {
-                    #say '.' x $level ~ (1+$x+3*$sx)~" "~(1+$y+3*$sy)~" Invalid solution...";
-                    #print-sudoku($sudoku,$level);
-                    return 0;
-                }
-            }
-        }
-    } while $resolved;
-    return 1;
+# tracing information
+sub trace(Int $level, Str $message) {
+    say '.' x $level, $message;
 }
 
-sub try-value($sudoku, Int $x, Int $y, Int $val, Int $level = 1) {
-    my $solution = clone-sudoku($sudoku);
-    $solution[$x][$y] = $val;
-    #print-sudoku($solution,$level);
-    my $solved = solve-sudoku($solution, $level);
-    if $solved {
-        return $solved;
-    } else {
-        return 0;
-    }
-}
-
-# Functions to find out which cell to try solving first
-multi cell-cost(Array $val) {
-    return $val.elems;
-}
-multi cell-cost(Int $val) {
-    return 1;
-}
-sub cell-cost-wrapper($sudoku, Array $val) {
-    my ($x, $y) = @($val);
-    # try to solve first the cells with the least amount of choices in
-    # the section with the least amount of choices.
-    my $this_cell_cost = cell-cost($sudoku[$x][$y]);
-    my $this_section_cost = 0;
-    my $sx = Int($x / 3);
-    my $sy = Int($y / 3);
-    for 0..2 X 0..2 -> $lx, $ly {
-        $this_section_cost += cell-cost($sudoku[$lx+$sx*3][$ly+$sy*3])
-    }
-    my $this_line_cost = 0;
-    for 0..8 -> $ly {
-        next if $ly >= $sy * 3 && $ly < ($sy+1)*3;
-        $this_line_cost += cell-cost($sudoku[$x][$ly])
-    }
-    my $this_column_cost = 0;
-    for 0..8 -> $lx {
-        next if $lx >= $sx * 3 && $lx < ($sx+1)*3;
-        $this_line_cost += cell-cost($sudoku[$lx][$y])
-    }
-    return $this_cell_cost*1000 + $this_section_cost + $this_line_cost + $this_column_cost;
-}
-
-# Function to decide which possible value to try first
-multi likelyhood-value-for-cell($val, Int $cell) {
-    return $val == $cell ?? 1 !! 0;
-}
-multi likelyhood-value-for-cell($val, Array $cell) {
-    return $cell.grep({ $val == $_ }) ?? 1 !! 0;
-}
-sub likelyhood-value-for-cell-wrapper($sudoku, Int $val, Int $x, Int $y) {
-    # we give higher points for how many times a value shows up as one
-    # of the options in the section, line or column.
-    my $this_section = 0;
-    my $sx = Int($x / 3);
-    my $sy = Int($y / 3);
-    for 0..2 X 0..2 -> $lx, $ly {
-        $this_section += likelyhood-value-for-cell($val, $sudoku[$lx+$sx*3][$ly+$sy*3])
-    }
-    my $this_line = 0;
-    for 0..8 -> $ly {
-        next if $ly >= $sy * 3 && $ly < ($sy+1)*3;
-        $this_line += likelyhood-value-for-cell($val, $sudoku[$x][$ly])
-    }
-    my $this_column = 0;
-    for 0..8 -> $lx {
-        next if $lx >= $sx * 3 && $lx < ($sx+1)*3;
-        $this_line += likelyhood-value-for-cell($val, $sudoku[$lx][$y])
-    }
-    return $this_section + $this_line + $this_column;
-}
-
-sub find-implicit-answers($sudoku, Int $level) {
-    my Bool $resolved = False;
-    for 0..8 X 0..8 -> $x, $y {
-        next unless $sudoku[$x][$y] ~~ Array;
-        for @($sudoku[$x][$y]) -> $val {
-            # If this is the only cell with this val as a possibility,
-            # just make it resolved already
-            my $matching = likelyhood-value-for-cell-wrapper($sudoku, $val, $x, $y);
-            if ($matching == 1) {
-                $sudoku[$x][$y] = $val;
-                #say '.' x $level ~ ($x+1)~" "~($y+1)~" solved implicitly...";
-                $resolved = True;
-            }
-        }
-    }
-    return $resolved;
-}
-
-my @cells;
-for 0..8 X 0..8 -> $x, $y {
-    push @cells, [ $x, $y ];
-}
-
-sub solve-sudoku($sudoku, Int $level = 1) {
-    # Tentative optimization...
+#
+# Try to solve this puzzle and return the resolved puzzle if it is at
+# all solvable in this configuration.
+sub solve($sudoku, Int $level) {
     # cleanup the impossible values first,
     if (cleanup-impossible-values($sudoku, $level)) {
         # try to find implicit answers
@@ -144,28 +46,143 @@ sub solve-sudoku($sudoku, Int $level = 1) {
             # and every time you find some, re-do the cleanup and try again
             cleanup-impossible-values($sudoku, $level);
         }
-        # start with the cells closer to a solution, to reduce the
-        # amount of guessing
-        for sort { cell-cost-wrapper($sudoku, $_) }, @cells {
-            my ($x, $y) = @($_);
-            next unless $sudoku[$x][$y] ~~ Array;
-            # Now sort the options according to how likely it is for
-            # it to be the actual answer to this cell
-            for sort { likelyhood-value-for-cell-wrapper($sudoku, $_, $x, $y) }, @($sudoku[$x][$y]) {
-                say '.' x $level ~ "Trying $_ on "~($x+1)~","~($y+1);
-                my $solution = try-value($sudoku, $x, $y, $_, $level+1);
-                if ($solution) { 
-                    say '.' x $level ~ "Solved... ($_ on "~($x+1)~" "~($y+1)~")";
-                    return $solution;
+        # Now let's actually try to solve a new value. But instead of
+        # going in sequence, we select the cell that is the closest to
+        # being solved already. This will reduce the overall number of
+        # guesses.
+        for sort { solution-complexity-factor($sudoku, $_[0], $_[1]) },
+        grep { $sudoku[$_[0]][$_[1]] ~~ Array },
+        @cells -> $cell
+        {
+            my ($x, $y) = @($cell);
+            # Now let's try the possible values in the order of
+            # uniqueness.
+            for sort { matches-in-competing-cells($sudoku, $x, $y, $_) }, @($sudoku[$x][$y]) -> $val {
+                trace $level, "Trying $val on "~($x+1)~","~($y+1);
+                my $solution = clone-sudoku($sudoku);
+                $solution[$x][$y] = $val;
+                my $solved = solve($solution, $level+1);
+                if $solved {
+                    trace $level, "Solved... ($val on "~($x+1)~","~($y+1)~")";
+                    return $solved;
                 }
             }
-            say '.' x $level ~ "Backtrack, path unsolvable... (on "~($x+1)~" "~($y+1)~")";
+            # if we fell through, it means that we found no valid
+            # value for this cell
+            trace $level, "Backtrack, path unsolvable... (on "~($x+1)~" "~($y+1)~")";
             return 0;
         }
+        # all cells are already solved.
         return $sudoku;
     } else {
-        return 0;
-    }    
+        # if the cleanup failed, it means this is an invalid grid.
+        return False;
+    }
+}
+
+# This function reduces the search space from values that are already
+# assigned to competing cells.
+sub cleanup-impossible-values($sudoku, Int $level = 1) {
+    my Bool $resolved;
+    repeat {
+        $resolved = False;
+        for grep { $sudoku[$_[0]][$_[1]] ~~ Array },
+        @cells -> $cell {
+            my ($x, $y) = @($cell);
+            # which block is this cell in
+            my $bx = Int($x / 3);
+            my $by = Int($y / 3);
+            
+            # A unfilled cell is not resolved, so it shouldn't match
+            my multi match-resolved-cell(Array $other, Int $this) {
+                return 0;
+            }
+            my multi match-resolved-cell(Int $other, Int $this) {
+                return $other == $this;
+            }
+
+            # Reduce the possible values to the ones that are still
+            # valid
+            my $r = $sudoku[$x][$y] = [
+                grep { !match-resolved-cell($sudoku[any(0..2)+3*$bx][any(0..2)+3*$by], $_) }, # same block
+                grep { !match-resolved-cell($sudoku[any(0..8)][$y], $_) }, # same line
+                grep { !match-resolved-cell($sudoku[$x][any(0..8)], $_) }, # same column
+                @($sudoku[$x][$y]);
+                ];
+            if ($r.elems == 1) {
+                # if only one element is left, then make it resolved
+                $sudoku[$x][$y] = $r[0];
+                $resolved = True;
+            } elsif ($r.elems == 0) {
+                # This is an invalid grid
+                return 0;
+            }
+        }
+    } while $resolved; # repeat if there was any change
+    return 1;
+}
+
+sub solution-complexity-factor($sudoku, Int $x, Int $y) {
+    my $bx = Int($x / 3); # this block
+    my $by = Int($y / 3);
+    my multi count-values(Array $val) {
+        return $val.elems;
+    }
+    my multi count-values(Int $val) {
+        return 1;
+    }
+    # the number of possible values should take precedence
+    my $f = 1000 * count-values($sudoku[$x][$y]);
+    for 0..2 X 0..2 -> $lx, $ly {
+        $f += count-values($sudoku[$lx+$bx*3][$ly+$by*3])
+    }
+    for 0..^($by*3), (($by+1)*3)..8 -> $ly {
+        $f += count-values($sudoku[$x][$ly])
+    }
+    for 0..^($bx*3), (($bx+1)*3)..8 -> $lx {
+        $f += count-values($sudoku[$lx][$y])
+    }
+    return $f;
+}
+
+sub matches-in-competing-cells($sudoku, Int $x, Int $y, Int $val) {
+    my $bx = Int($x / 3); # this block
+    my $by = Int($y / 3);
+    # Function to decide which possible value to try first
+    my multi cell-matching(Int $cell) {
+        return $val == $cell ?? 1 !! 0;
+    }
+    my multi cell-matching(Array $cell) {
+        return $cell.grep({ $val == $_ }) ?? 1 !! 0;
+    }
+    my $c = 0;
+    for 0..2 X 0..2 -> $lx, $ly {
+        $c += cell-matching($sudoku[$lx+$bx*3][$ly+$by*3])
+    }
+    for 0..^($by*3), (($by+1)*3)..8 -> $ly {
+        $c += cell-matching($sudoku[$x][$ly])
+    }
+    for 0..^($bx*3), (($bx+1)*3)..8 -> $lx {
+        $c += cell-matching($sudoku[$lx][$y])
+    }
+    return $c;
+}
+
+sub find-implicit-answers($sudoku, Int $level) {
+    my Bool $resolved = False;
+    for grep { $sudoku[$_[0]][$_[1]] ~~ Array },
+    @cells -> $cell {
+        my ($x, $y) = @($cell);
+        for @($sudoku[$x][$y]) -> $val {
+            # If this is the only cell with this val as a possibility,
+            # just make it resolved already
+            if (matches-in-competing-cells($sudoku, $x, $y, $val) == 1) {
+                $sudoku[$x][$y] = $val;
+                $resolved = True;
+            }
+        }
+    }
+    return $resolved;
 }
 
 my $easy_sudoku =
@@ -228,7 +245,7 @@ my $hard_sudoku2 =
     [ 0,1,0,0,0,9,0,0,0 ],
     [ 0,0,2,5,4,0,0,0,0 ];
 
-my $solved = solve-sudoku($hard_sudoku);
+my $solved = solve($hard_sudoku2, 0);
 if $solved {
     print-sudoku($solved,0);
 } else {
