@@ -30,11 +30,6 @@ use v6;
 # keep a list with all the cells, handy for traversal
 my @cells = do for 0..8 X 0..8 -> $x, $y { [ $x, $y ] };
 
-# tracing information
-sub trace(Int $level, Str $message) {
-    say '.' x $level, $message;
-}
-
 #
 # Try to solve this puzzle and return the resolved puzzle if it is at
 # all solvable in this configuration.
@@ -54,11 +49,11 @@ sub solve($sudoku, Int $level) {
         grep { $sudoku[$_[0]][$_[1]] ~~ Array },
         @cells -> $cell
         {
-            my ($x, $y) = @($cell);
+            my Int ($x, $y) = @($cell);
             # Now let's try the possible values in the order of
             # uniqueness.
             for sort { matches-in-competing-cells($sudoku, $x, $y, $_) }, @($sudoku[$x][$y]) -> $val {
-                trace $level, "Trying $val on "~($x+1)~","~($y+1);
+                trace $level, "Trying $val on "~($x+1)~","~($y+1)~" "~$sudoku[$x][$y].perl;
                 my $solution = clone-sudoku($sudoku);
                 $solution[$x][$y] = $val;
                 my $solved = solve($solution, $level+1);
@@ -88,10 +83,10 @@ sub cleanup-impossible-values($sudoku, Int $level = 1) {
         $resolved = False;
         for grep { $sudoku[$_[0]][$_[1]] ~~ Array },
         @cells -> $cell {
-            my ($x, $y) = @($cell);
+            my Int ($x, $y) = @($cell);
             # which block is this cell in
-            my $bx = Int($x / 3);
-            my $by = Int($y / 3);
+            my Int $bx = Int($x / 3);
+            my Int $by = Int($y / 3);
             
             # A unfilled cell is not resolved, so it shouldn't match
             my multi match-resolved-cell(Array $other, Int $this) {
@@ -103,19 +98,20 @@ sub cleanup-impossible-values($sudoku, Int $level = 1) {
 
             # Reduce the possible values to the ones that are still
             # valid
-            my $r = $sudoku[$x][$y] = [
+            my @r =
                 grep { !match-resolved-cell($sudoku[any(0..2)+3*$bx][any(0..2)+3*$by], $_) }, # same block
                 grep { !match-resolved-cell($sudoku[any(0..8)][$y], $_) }, # same line
                 grep { !match-resolved-cell($sudoku[$x][any(0..8)], $_) }, # same column
                 @($sudoku[$x][$y]);
-                ];
-            if ($r.elems == 1) {
+            if (@r.elems == 1) {
                 # if only one element is left, then make it resolved
-                $sudoku[$x][$y] = $r[0];
+                $sudoku[$x][$y] = @r[0];
                 $resolved = True;
-            } elsif ($r.elems == 0) {
+            } elsif (@r.elems == 0) {
                 # This is an invalid grid
                 return 0;
+            } else {
+                $sudoku[$x][$y] = @r;
             }
         }
     } while $resolved; # repeat if there was any change
@@ -123,8 +119,8 @@ sub cleanup-impossible-values($sudoku, Int $level = 1) {
 }
 
 sub solution-complexity-factor($sudoku, Int $x, Int $y) {
-    my $bx = Int($x / 3); # this block
-    my $by = Int($y / 3);
+    my Int $bx = Int($x / 3); # this block
+    my Int $by = Int($y / 3);
     my multi count-values(Array $val) {
         return $val.elems;
     }
@@ -132,7 +128,7 @@ sub solution-complexity-factor($sudoku, Int $x, Int $y) {
         return 1;
     }
     # the number of possible values should take precedence
-    my $f = 1000 * count-values($sudoku[$x][$y]);
+    my Int $f = 1000 * count-values($sudoku[$x][$y]);
     for 0..2 X 0..2 -> $lx, $ly {
         $f += count-values($sudoku[$lx+$bx*3][$ly+$by*3])
     }
@@ -146,8 +142,8 @@ sub solution-complexity-factor($sudoku, Int $x, Int $y) {
 }
 
 sub matches-in-competing-cells($sudoku, Int $x, Int $y, Int $val) {
-    my $bx = Int($x / 3); # this block
-    my $by = Int($y / 3);
+    my Int $bx = Int($x / 3); # this block
+    my Int $by = Int($y / 3);
     # Function to decide which possible value to try first
     my multi cell-matching(Int $cell) {
         return $val == $cell ?? 1 !! 0;
@@ -155,7 +151,7 @@ sub matches-in-competing-cells($sudoku, Int $x, Int $y, Int $val) {
     my multi cell-matching(Array $cell) {
         return $cell.grep({ $val == $_ }) ?? 1 !! 0;
     }
-    my $c = 0;
+    my Int $c = 0;
     for 0..2 X 0..2 -> $lx, $ly {
         $c += cell-matching($sudoku[$lx+$bx*3][$ly+$by*3])
     }
@@ -172,7 +168,7 @@ sub find-implicit-answers($sudoku, Int $level) {
     my Bool $resolved = False;
     for grep { $sudoku[$_[0]][$_[1]] ~~ Array },
     @cells -> $cell {
-        my ($x, $y) = @($cell);
+        my Int ($x, $y) = @($cell);
         for @($sudoku[$x][$y]) -> $val {
             # If this is the only cell with this val as a possibility,
             # just make it resolved already
@@ -185,55 +181,7 @@ sub find-implicit-answers($sudoku, Int $level) {
     return $resolved;
 }
 
-my $easy_sudoku =
-    map { [ map { $_ == 0 ?? [1..9] !! $_+0  }, @($_) ] },
-    [ 0,0,8,0,3,0,5,4,0 ],
-    [ 3,0,0,4,0,7,9,0,0 ],
-    [ 4,1,0,0,0,8,0,0,2 ],
-    [ 0,4,3,5,0,2,0,6,0 ],
-    [ 5,0,0,0,0,0,0,0,8 ],
-    [ 0,6,0,3,0,9,4,1,0 ],
-    [ 1,0,0,8,0,0,0,2,7 ],
-    [ 0,0,5,6,0,3,0,0,4 ],
-    [ 0,2,9,0,7,0,8,0,0 ];
-
-my $medium_sudoku =
-    map { [ map { $_ == 0 ?? [1..9] !! $_+0  }, @($_) ] },
-    [ 0,0,6,2,4,0,0,3,0 ],
-    [ 0,3,0,0,0,0,0,9,0 ],
-    [ 2,0,0,0,0,0,0,7,0 ],
-    [ 5,0,0,8,0,0,0,2,0 ],
-    [ 0,0,1,0,0,0,6,0,0 ],
-    [ 0,2,0,0,0,3,0,0,7 ],
-    [ 0,5,0,0,0,0,0,0,3 ],
-    [ 0,9,0,0,0,0,0,8,0 ],
-    [ 0,1,0,0,6,2,5,0,0 ];
-
-my $medium_sudoku2 =
-    map { [ map { $_ == 0 ?? [1..9] !! $_+0  }, @($_) ] },
-    [ 8,1,0,0,0,0,0,6,5 ],
-    [ 0,0,3,1,0,9,7,0,0 ],
-    [ 0,0,0,0,6,0,0,0,0 ],
-    [ 3,0,0,0,1,0,0,0,9 ],
-    [ 0,0,0,8,3,7,0,0,0 ],
-    [ 1,0,0,0,5,0,0,0,7 ],
-    [ 0,0,0,0,2,0,0,0,0 ],
-    [ 0,0,7,4,0,8,3,0,0 ],
-    [ 4,5,0,0,0,0,0,9,6 ];
-
-my $hard_sudoku =
-    map { [ map { $_ == 0 ?? [1..9] !! $_+0  }, @($_) ] },
-    [ 8,5,0,0,0,2,4,0,0 ],
-    [ 7,2,0,0,0,0,0,0,9 ],
-    [ 0,0,4,0,0,0,0,0,0 ],
-    [ 0,0,0,1,0,7,0,0,2 ],
-    [ 3,0,5,0,0,0,9,0,0 ],
-    [ 0,4,0,0,0,0,0,0,0 ],
-    [ 0,0,0,0,8,0,0,7,0 ],
-    [ 0,1,7,0,0,0,0,0,0 ],
-    [ 0,0,0,0,3,6,0,4,0 ];
-
-my $hard_sudoku2 =
+my $puzzle =
     map { [ map { $_ == 0 ?? [1..9] !! $_+0  }, @($_) ] },
     [ 0,0,0,0,3,7,6,0,0 ],
     [ 0,0,0,6,0,0,0,9,0 ],
@@ -245,14 +193,19 @@ my $hard_sudoku2 =
     [ 0,1,0,0,0,9,0,0,0 ],
     [ 0,0,2,5,4,0,0,0,0 ];
 
-my $solved = solve($hard_sudoku2, 0);
+my $solved = solve($puzzle, 0);
 if $solved {
     print-sudoku($solved,0);
 } else {
     say "unsolvable.";
 }
 
-# Utility function, not really part of the solution
+# Utility functions, not really part of the solution
+
+sub trace(Int $level, Str $message) {
+    say '.' x $level, $message;
+}
+
 sub clone-sudoku($sudoku) {
     my $clone;
     for 0..8 X 0..8 -> $x, $y {
@@ -261,13 +214,12 @@ sub clone-sudoku($sudoku) {
     return $clone;
 }
 
-# Utility function, not really part of the solution
 sub print-sudoku($sudoku, Int $level = 1) {
-    say '.' x $level ~ '-' x 5*9;
-    say '.' x $level ~ (map -> $row {
-        (map -> $cell {
+    trace $level, '-' x 5*9;
+    for @($sudoku) -> $row {
+        trace $level, join " ", do for @($row) -> $cell {
             $cell ~~ Array ?? "#{$cell.elems}#" !! " $cell " 
-         }, @($row)).join("  ") 
-                        }, @($sudoku)).join("\n"~('.'x$level));
+        }
+    }
 }
 
